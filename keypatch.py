@@ -126,27 +126,30 @@ KP_CFGFILE = os.path.join(idaapi.get_user_idadir(), "keypatch.cfg")
 # save all the info on patching
 patch_info = []
 
-################################ Python2/3 Compatibility function #######################################
-# Convert unicode/string/bytes to string
+################################ Python3 Compatibility function #######################################
+# Convert bytes to string
 def to_string(s):
-  # python3 bytes
-  if six.PY3 and isinstance(s, bytes):
-      return s.decode('latin-1')
-  # python2 unicode
-  elif six.PY2 and isinstance(s, six.text_type):
-      return s.encode('utf-8')
-  return str(s)
+    """Convert bytes/string to string"""
+    if isinstance(s, bytes):
+        return s.decode('latin-1')
+    return str(s)
 
 def to_hexstr(buf, sep=' '):
-    # for python3 bytes
-    if six.PY3 and isinstance(buf, bytes):
-        return sep.join("{0:02x}".format(c) for c in buf).upper()
-    return sep.join("{0:02x}".format(ord(c)) for c in buf).upper()
+    """Convert bytes to hex string"""
+    if isinstance(buf, bytes):
+        return sep.join(f"{c:02x}" for c in buf).upper()
+    # Handle string input (legacy)
+    return sep.join(f"{ord(c):02x}" for c in buf).upper()
 #########################################################################################################
 
-################################ IDA 6/7 Compatibility function #########################################
+################################ IDA 6/7/9 Compatibility function #########################################
+def is_ida_version(min_version):
+    """Check if IDA version is at least min_version"""
+    return idaapi.IDA_SDK_VERSION >= min_version
+
 def get_dtype(ea, op_idx):
-    if idaapi.IDA_SDK_VERSION >= 700:
+    """Get data type and size for operand at given address"""
+    if is_ida_version(700):
         insn = idaapi.insn_t()
         idaapi.decode_insn(insn, ea)
         dtype = insn.ops[op_idx].dtype
@@ -157,39 +160,35 @@ def get_dtype(ea, op_idx):
     return dtype, dtyp_size
 
 def set_comment(ea, comment):
-    if idaapi.IDA_SDK_VERSION >= 700:
+    """Set comment at address"""
+    if is_ida_version(700):
         idc.set_cmt(ea, comment, 0)
     else:
         idc.MakeComm(ea, comment)
 
 def get_comment(ea):
-    if idaapi.IDA_SDK_VERSION >= 700:
+    """Get comment at address"""
+    if is_ida_version(700):
         return idc.get_cmt(ea, 0)
     return idc.Comment(ea)
 
 def read_range_selection():
-    if idaapi.IDA_SDK_VERSION >= 700:
+    """Read selected address range"""
+    if is_ida_version(700):
         return idaapi.read_range_selection(None)
     return idaapi.read_selection()
 #########################################################################################################
 
 # return a normalized code, or None if input is invalid
 def convert_hexstr(code):
-    # normalize code
+    """Convert hex string to list of bytes, returns None if invalid"""
+    # normalize code - remove common separators and prefixes
     code = code.lower()
-    code = code.replace(' ', '')    # remove space
-    code = code.replace('h', '')    # remove trailing 'h' in 90h
-    code = code.replace('0x', '')   # remove 0x
-    code = code.replace('\\x', '')  # remove \x
-    code = code.replace(',', '')    # remove ,
-    code = code.replace(';', '')    # remove ;
-    code = code.replace('"', '')    # remove "
-    code = code.replace("'", '')    # remove '
-    code = code.replace("+", '')    # remove +
+    for char in [' ', 'h', '0x', '\\x', ',', ';', '"', "'", '+']: 
+        code = code.replace(char, '')
 
-    # single-digit hexcode?
-    if len(code) == 1 and ((code >= '0' and code <= '9') or (code >= 'a' and code <= 'f')):
-        # stick 0 in front (so 'a' --> '0a')
+    # single-digit hexcode? pad with zero
+    if len(code) == 1 and code in '0123456789abcdef':
         code = '0' + code
 
     # odd-length is invalid
@@ -197,10 +196,10 @@ def convert_hexstr(code):
         return None
 
     try:
-        hex_data = code.decode('hex')
-        # we want a list of int
-        return [ord(i) for i in hex_data]
-    except:
+        # Convert hex string to bytes (Python 3)
+        hex_data = bytes.fromhex(code)
+        return list(hex_data)
+    except ValueError:
         # invalid hex
         return None
 
@@ -208,35 +207,28 @@ def convert_hexstr(code):
 # download a file from @url, then return (result, file-content)
 # return (0, content) on success, or ({1|2}, None) on download failure
 def url_download(url):
-    # Import for python2
-    try:
-        from urllib2 import Request, urlopen, URLError, HTTPError
-    except:
-        from urllib.request import Request, urlopen
-        from urllib.error import URLError, HTTPError
+    """Download content from URL
+    
+    Returns:
+        tuple: (status_code, content) where status_code is:
+            0 - success
+            1 - HTTP/URL error
+            2 - other error
+    """
+    from urllib.request import Request, urlopen
+    from urllib.error import URLError, HTTPError
 
-    # create the url and the request
-    req = Request(url)
-
-    # Open the url
     try:
-        # download this URL
-        f = urlopen(req)
-        content = f.read()
+        req = Request(url)
+        with urlopen(req) as f:
+            content = f.read()
         return (0, content)
-
-    # handle errors
-    except HTTPError as e:
-        # print "HTTP Error:", e.code , url
-        # fail to download this file
-        return (1, None)
-    except URLError as e:
-        # print "URL Error:", e.reason , url
-        # fail to download this file
+    except (HTTPError, URLError) as e:
+        # Network or HTTP error
         return (1, None)
     except Exception as e:
-        # fail to save the downloaded file
-        # print("Error:", e)
+        # Other errors
+        print(f"Keypatch: Download error: {e}")
         return (2, None)
 
 
@@ -309,28 +301,30 @@ class Keypatch_Asm:
     # return Keystone arch & mode (with endianess included)
     @staticmethod
     def get_hardware_mode():
-        (arch, mode) = (None, None)
+        """Detect hardware architecture and mode from IDA binary info"""
+        arch, mode = None, None
 
-        if idaapi.IDA_SDK_VERSION >= 900:
+        if is_ida_version(900):
+            # IDA 9.0+
             is_64bit = ida_ida.idainfo_is_64bit()
             is_32bit = ida_ida.idainfo_is_32bit()
             cpuname = ida_ida.inf_get_procname().lower()
             is_be = ida_ida.inf_is_be()
         else:
-            # heuristically detect hardware setup
+            # IDA 7.x and older
             info = idaapi.get_inf_structure()
             is_64bit = info.is_64bit()
             is_32bit = info.is_32bit()
         
             try:
                 cpuname = info.procname.lower()
-            except:
+            except AttributeError:
                 cpuname = info.procName.lower()
 
             try:
-                # since IDA7 beta 3 (170724) renamed inf.mf -> is_be()/set_be()
+                # IDA 7 beta 3+ renamed inf.mf -> is_be()/set_be()
                 is_be = idaapi.cvar.inf.is_be()
-            except:
+            except AttributeError:
                 # older IDA versions
                 is_be = idaapi.cvar.inf.mf
                 
@@ -453,7 +447,7 @@ class Keypatch_Asm:
             return _op
 
         if self.check_address(address) == 0:
-            print("Keypatch: WARNING: invalid input address {0}".format(address))
+            print(f"Keypatch: WARNING: invalid input address {address}")
             return assembly
 
         # for now, we only support IDA name resolve for X86, ARM, ARM64, MIPS, PPC, SPARC
@@ -792,7 +786,7 @@ class Keypatch_Asm:
         while ea < (address + size):
 
             if not has_value(get_full_flags(ea)):
-                print("Keypatch: FAILED to read data at 0x{0:X}".format(ea))
+                print(f"Keypatch: FAILED to read data at 0x{ea:X}")
                 break
 
             orig_byte = get_wide_byte(ea)
@@ -802,7 +796,7 @@ class Keypatch_Asm:
             if patch_byte != orig_byte:
                 # patch one byte
                 if idaapi.patch_byte(ea, patch_byte) != 1:
-                    print("Keypatch: FAILED to patch byte at 0x{0:X} [0x{1:X}]".format(ea, patch_byte))
+                    print(f"Keypatch: FAILED to patch byte at 0x{ea:X} [0x{patch_byte:X}]")
                     break
             ea += 1
         return (ea - address, orig_data)
@@ -821,11 +815,9 @@ class Keypatch_Asm:
                 # revert the changes
                 (rlen, _) = self.patch_raw(address, orig_data, patched_len)
                 if rlen == patched_len:
-                    print("Keypatch: successfully reverted changes of {0:d} byte(s) at 0x{1:X} [{2}]".format(
-                                        patched_len, address, to_hexstr(orig_data)))
+                    print(f"Keypatch: successfully reverted changes of {patched_len} byte(s) at 0x{address:X} [{to_hexstr(orig_data)}]")
                 else:
-                    print("Keypatch: FAILED to revert changes of {0:d} byte(s) at 0x{1:X} [{2}]".format(
-                                        patched_len, address, to_hexstr(orig_data)))
+                    print(f"Keypatch: FAILED to revert changes of {patched_len} byte(s) at 0x{address:X} [{to_hexstr(orig_data)}]")
 
             return (None, None)
 
@@ -918,11 +910,9 @@ class Keypatch_Asm:
                 set_comment(address, new_comment)
 
             if padding_len == 0:
-                print("Keypatch: successfully patched {0:d} byte(s) at 0x{1:X} from [{2}] to [{3}]".format(plen,
-                                        address, to_hexstr(p_orig_data), to_hexstr(patch_data)))
+                print(f"Keypatch: successfully patched {plen} byte(s) at 0x{address:X} from [{to_hexstr(p_orig_data)}] to [{to_hexstr(patch_data)}]")
             else:
-                print("Keypatch: successfully patched {0:d} byte(s) at 0x{1:X} from [{2}] to [{3}], with {4} byte(s) NOP padded".format(plen,
-                                        address, to_hexstr(p_orig_data), to_hexstr(patch_data), padding_len))
+                print(f"Keypatch: successfully patched {plen} byte(s) at 0x{address:X} from [{to_hexstr(p_orig_data)}] to [{to_hexstr(patch_data)}], with {padding_len} byte(s) NOP padded")
             # save this patching for future "undo"
             patch_info.append((address, assembly, p_orig_data, new_patch_comment))
         else:   # we are reverting
@@ -931,8 +921,7 @@ class Keypatch_Asm:
                 new_comment = orig_comment.replace(patch_comment, '')
                 set_comment(address, new_comment)
 
-            print("Keypatch: successfully reverted {0:d} byte(s) at 0x{1:X} from [{2}] to [{3}]".format(plen,
-                                        address, to_hexstr(p_orig_data), to_hexstr(patch_data)))
+            print(f"Keypatch: successfully reverted {plen} byte(s) at 0x{address:X} from [{to_hexstr(p_orig_data)}] to [{to_hexstr(patch_data)}]")
 
         return plen
 
@@ -987,15 +976,14 @@ class Keypatch_Asm:
         # append original instruction to comments
         if save_origcode is True:
             if orig_comment == '':
-                new_patch_comment = "Keypatch filled range [0x{0:X}:0x{1:X}] ({2} bytes), replaced:\n  {3}".format(addr_begin, addr_end - 1, addr_end - addr_begin, '\n  '.join(orig_asm))
+                new_patch_comment = f"Keypatch filled range [0x{addr_begin:X}:0x{addr_end - 1:X}] ({addr_end - addr_begin} bytes), replaced:\n  {chr(10).join(['  ' + x for x in orig_asm])}"
             else:
-                new_patch_comment = "\nKeypatch filled range [0x{0:X}:0x{1:X}] ({2} bytes), replaced:\n  {3}".format(addr_begin, addr_end - 1, addr_end - addr_begin, '\n  '.join(orig_asm))
+                new_patch_comment = f"\nKeypatch filled range [0x{addr_begin:X}:0x{addr_end - 1:X}] ({addr_end - addr_begin} bytes), replaced:\n  {chr(10).join(['  ' + x for x in orig_asm])}"
 
-            new_comment = "{0}{1}".format(orig_comment, new_patch_comment)
+            new_comment = f"{orig_comment}{new_patch_comment}"
             set_comment(addr_begin, new_comment)
 
-        print("Keypatch: successfully filled range [0x{0:X}:0x{1:X}] ({2} bytes) with \"{3}\", replaced \"{4}\"".format(
-                    addr_begin, addr_end - 1, addr_end - addr_begin, assembly, '; '.join(orig_asm)))
+        print(f"Keypatch: successfully filled range [0x{addr_begin:X}:0x{addr_end - 1:X}] ({addr_end - addr_begin} bytes) with \"{assembly}\", replaced \"{'; '.join(orig_asm)}\"")
 
         # save this modification for future "undo"
         patch_info.append((addr_begin, '\n  '.join(assembly_new), p_orig_data, new_patch_comment))
@@ -1387,8 +1375,10 @@ KEYPATCH:: Search
 
     ################################ IDA 6/7 Compatibility method #######################################
     def find_binary(self, ea):
-        if idaapi.IDA_SDK_VERSION >= 700:
-            return ida_search.find_binary(ea, idaapi.cvar.inf.max_ea, self.GetControlValue(self.c_encoding), 16, idc.SEARCH_DOWN)
+        """Find binary pattern starting from address"""
+        if is_ida_version(700):
+            return ida_search.find_binary(ea, idaapi.cvar.inf.max_ea, 
+                                         self.GetControlValue(self.c_encoding), 16, idc.SEARCH_DOWN)
         return idc.FindBinary(ea, idc.SEARCH_DOWN, self.GetControlValue(self.c_encoding))
     #####################################################################################################
 
@@ -1549,20 +1539,17 @@ try:
 
         @classmethod
         def update(self, ctx):
+            """Update menu item availability"""
             try:
-                if idaapi.IDA_SDK_VERSION >= 900:
-                    # Since IDA 9.0, form_type is deprecated, should use widget_type
-                    if ctx.widget_type == idaapi.BWN_DISASM:
-                        return idaapi.AST_ENABLE_FOR_FORM
-                    else:
-                        return idaapi.AST_DISABLE_FOR_FORM
+                if is_ida_version(900):
+                    # IDA 9.0+: use widget_type instead of deprecated form_type
+                    is_disasm = ctx.widget_type == idaapi.BWN_DISASM
                 else:
-                    if ctx.form_type == idaapi.BWN_DISASM:
-                        return idaapi.AST_ENABLE_FOR_FORM
-                    else:
-                        return idaapi.AST_DISABLE_FOR_FORM
-            except Exception as e:
-                # Add exception for main menu on >= IDA 7.0
+                    is_disasm = ctx.form_type == idaapi.BWN_DISASM
+                
+                return idaapi.AST_ENABLE_FOR_FORM if is_disasm else idaapi.AST_DISABLE_FOR_FORM
+            except Exception:
+                # Enable for main menu on IDA 7.0+
                 return idaapi.AST_ENABLE_ALWAYS
             
     # context menu for Patcher
@@ -1606,43 +1593,32 @@ except:
 
 # hooks for popup menu
 class Hooks(idaapi.UI_Hooks):
-    if idaapi.IDA_SDK_VERSION >= 700:
-        # IDA >= 700 right click widget popup
+    """UI hooks for right-click popup menu"""
+    
+    def _attach_menu_items(self, form, popup):
+        """Helper to attach Keypatch menu items to popup"""
+        try:
+            idaapi.attach_action_to_popup(form, popup, Kp_MC_Patcher.get_name(), 'Keypatch/')
+            idaapi.attach_action_to_popup(form, popup, Kp_MC_Fill_Range.get_name(), 'Keypatch/')
+            idaapi.attach_action_to_popup(form, popup, Kp_MC_Undo.get_name(), 'Keypatch/')
+            idaapi.attach_action_to_popup(form, popup, "-", 'Keypatch/')
+            idaapi.attach_action_to_popup(form, popup, Kp_MC_Search.get_name(), 'Keypatch/')
+            idaapi.attach_action_to_popup(form, popup, "-", 'Keypatch/')
+            idaapi.attach_action_to_popup(form, popup, Kp_MC_Updater.get_name(), 'Keypatch/')
+            idaapi.attach_action_to_popup(form, popup, Kp_MC_About.get_name(), 'Keypatch/')
+        except Exception:
+            pass
+    
+    if is_ida_version(700):
+        # IDA >= 7.0 right click widget popup
         def finish_populating_widget_popup(self, form, popup):
             if idaapi.get_widget_type(form) == idaapi.BWN_DISASM:
-                try:
-                    idaapi.attach_action_to_popup(form, popup, Kp_MC_Patcher.get_name(), 'Keypatch/')
-                    idaapi.attach_action_to_popup(form, popup, Kp_MC_Fill_Range.get_name(), 'Keypatch/')
-                    idaapi.attach_action_to_popup(form, popup, Kp_MC_Undo.get_name(), 'Keypatch/')
-                    idaapi.attach_action_to_popup(form, popup, "-", 'Keypatch/')
-                    idaapi.attach_action_to_popup(form, popup, Kp_MC_Search.get_name(), 'Keypatch/')
-                    idaapi.attach_action_to_popup(form, popup, "-", 'Keypatch/')
-                    idaapi.attach_action_to_popup(form, popup, Kp_MC_Updater.get_name(), 'Keypatch/')
-                    idaapi.attach_action_to_popup(form, popup, Kp_MC_About.get_name(), 'Keypatch/')
-                except:
-                    pass
+                self._attach_menu_items(form, popup)
     else:
-        # IDA < 700 right click popup
+        # IDA < 7.0 right click popup
         def finish_populating_tform_popup(self, form, popup):
-            # We'll add our action to all "IDA View-*"s.
-            # If we wanted to add it only to "IDA View-A", we could
-            # also discriminate on the widget's title:
-            #
-            #  if idaapi.get_tform_title(form) == "IDA View-A":
-            #      ...
-            #
             if idaapi.get_tform_type(form) == idaapi.BWN_DISASM:
-                try:
-                    idaapi.attach_action_to_popup(form, popup, Kp_MC_Patcher.get_name(), 'Keypatch/')
-                    idaapi.attach_action_to_popup(form, popup, Kp_MC_Fill_Range.get_name(), 'Keypatch/')
-                    idaapi.attach_action_to_popup(form, popup, Kp_MC_Undo.get_name(), 'Keypatch/')
-                    idaapi.attach_action_to_popup(form, popup, "-", 'Keypatch/')
-                    idaapi.attach_action_to_popup(form, popup, Kp_MC_Search.get_name(), 'Keypatch/')
-                    idaapi.attach_action_to_popup(form, popup, "-", 'Keypatch/')
-                    idaapi.attach_action_to_popup(form, popup, Kp_MC_Updater.get_name(), 'Keypatch/')
-                    idaapi.attach_action_to_popup(form, popup, Kp_MC_About.get_name(), 'Keypatch/')
-                except:
-                    pass
+                self._attach_menu_items(form, popup)
 
 
 # check if we already initialized Keypatch
@@ -1659,26 +1635,24 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
     flags = idaapi.PLUGIN_KEEP
 
     def load_configuration(self):
+        """Load plugin configuration from file"""
         # default
         self.opts = {}
 
         # load configuration from file
         try:
-            f = open(KP_CFGFILE, "rt")
-            self.opts = json.load(f)
-            f.close()
-        except IOError:
-            print("Keypatch: FAILED to load config file. Use default setup now.")
+            with open(KP_CFGFILE, "rt") as f:
+                self.opts = json.load(f)
+        except FileNotFoundError:
+            print("Keypatch: Config file not found. Using default settings.")
+        except json.JSONDecodeError as e:
+            print(f"Keypatch: Config file is corrupted: {e}. Using default settings.")
         except Exception as e:
-            print("Keypatch: FAILED to load config file, with exception: {0}".format(str(e)))
+            print(f"Keypatch: Failed to load config file: {e}. Using default settings.")
 
         # use default values if not defined in config file
-        if 'c_opt_padding' not in self.opts:
-            self.opts['c_opt_padding'] = 1
-
-        if 'c_opt_comment' not in self.opts:
-            self.opts['c_opt_comment'] = 2
-
+        self.opts.setdefault('c_opt_padding', 1)
+        self.opts.setdefault('c_opt_comment', 2)
         self.opts['c_opt_chk'] = self.opts['c_opt_padding'] | self.opts['c_opt_comment']
 
     def init(self):
@@ -1703,8 +1677,8 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
         if kp_initialized == False:
             kp_initialized = True
 
-            if idaapi.IDA_SDK_VERSION >= 700:
-                # Add menu IDA >= 7.0
+            if is_ida_version(700):
+                # Add menu for IDA >= 7.0
                 idaapi.attach_action_to_menu("Edit/Keypatch/Patcher", Kp_MC_Patcher.get_name(), idaapi.SETMENU_APP)
                 idaapi.attach_action_to_menu("Edit/Keypatch/About", Kp_MC_About.get_name(), idaapi.SETMENU_APP)
                 idaapi.attach_action_to_menu("Edit/Keypatch/Check for update", Kp_MC_Updater.get_name(), idaapi.SETMENU_APP)
@@ -1722,10 +1696,9 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
                     idaapi.add_menu_item("Edit/Keypatch/", "-", "", 1, self.menu_null, None)
                     idaapi.add_menu_item("Edit/Keypatch/", "Undo last patching", "", 1, self.undo, None)
                     idaapi.add_menu_item("Edit/Keypatch/", "Fill Range", "", 1, self.fill_range, None)
-                elif idaapi.IDA_SDK_VERSION < 680:
-                    # older IDAPython (such as in IDAPro 6.6) does add new submenu.
-                    # in this case, put Keypatch menu in menu Edit \ Patch program
-                    # not sure about v6.7, so to be safe we just check against v6.8
+                elif not is_ida_version(680):
+                    # IDA < 6.8: older IDAPython doesn't add new submenu
+                    # Put Keypatch menu in Edit \ Patch program instead
                     idaapi.add_menu_item("Edit/Patch program/", "-", "", 0, self.menu_null, None)
                     idaapi.add_menu_item("Edit/Patch program/", "Keypatch:: About", "", 0, self.about, None)
                     idaapi.add_menu_item("Edit/Patch program/", "Keypatch:: Check for update", "", 0, self.updater, None)
@@ -1735,13 +1708,13 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
                     idaapi.add_menu_item("Edit/Patch program/", "Keypatch:: Patcher     (Ctrl-Alt-K)", "", 0, self.patcher, None)
 
             print("=" * 80)
-            print("Keypatch v{0} (c) Nguyen Anh Quynh & Thanh Nguyen, 2018".format(VERSION))
-            print("Keypatch is using Keystone v{0}".format(keystone.__version__))
+            print(f"Keypatch v{VERSION} (c) Nguyen Anh Quynh & Thanh Nguyen, 2018")
+            print(f"Keypatch is using Keystone v{keystone.__version__}")
             print("Keypatch Patcher's shortcut key is Ctrl-Alt-K")
             print("Use the same hotkey Ctrl-Alt-K to open 'Fill Range' window on a selected range of code")
             print("To revert (undo) the last patching, choose menu Edit | Keypatch | Undo last patching")
             print("Keypatch Search is available from menu Edit | Keypatch | Search")
-            print("Find more information about Keypatch at http://keystone-engine.org/keypatch")
+            print(f"Find more information about Keypatch at {KP_HOMEPAGE}")
 
             self.load_configuration()
 
@@ -1757,13 +1730,13 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
 
         if self.opts is None:
             return
-        #save configuration to file
+        # save configuration to file
         try:
-            json.dump(self.opts, open(KP_CFGFILE, "wt"))
+            with open(KP_CFGFILE, "wt") as f:
+                json.dump(self.opts, f, indent=2)
+            print(f"Keypatch: configuration is saved to {KP_CFGFILE}")
         except Exception as e:
-            print("Keypatch: FAILED to save config file, with exception: {0}".format(str(e)))
-        else:
-            print("Keypatch: configuration is saved to {0}".format(KP_CFGFILE))
+            print(f"Keypatch: FAILED to save config file: {e}")
 
     # null handler
     def menu_null(self):
@@ -1777,25 +1750,29 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
 
     # handler for Check-for-Update menu
     def updater(self):
-        (r, content) = url_download(KP_GITHUB_VERSION)
+        """Check for plugin updates from GitHub"""
+        r, content = url_download(KP_GITHUB_VERSION)
         content = to_string(content)
         if r == 0:
             # find stable version
             sig = 'VERSION_STABLE = "'
-            tmp = content[content.find(sig)+len(sig):]
-            version_stable = tmp[:tmp.find('"')]
+            try:
+                tmp = content[content.find(sig)+len(sig):]
+                version_stable = tmp[:tmp.find('"')]
+            except Exception as e:
+                print(f"Keypatch: Failed to parse version info: {e}")
+                warning("ERROR: Keypatch failed to parse version information.")
+                return
 
             # compare with the current version
             if version_stable == VERSION:
-                f = Update_Form(VERSION, "Good, you are already on the latest stable version!")
-                f.Execute()
-                # free this form
-                f.Free()
+                msg = "Good, you are already on the latest stable version!"
             else:
-                f = Update_Form(VERSION, "Download latest stable version {0} from http://keystone-engine.org/keypatch".format(version_stable))
-                f.Execute()
-                # free this form
-                f.Free()
+                msg = f"Download latest stable version {version_stable} from {KP_HOMEPAGE}"
+            
+            f = Update_Form(VERSION, msg)
+            f.Execute()
+            f.Free()
         else:
             # fail to download
             warning("ERROR: Keypatch failed to connect to internet (Github). Try again later.")
@@ -1856,8 +1833,7 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
 
                     raw_assembly = self.kp_asm.ida_resolve(assembly, address)
 
-                    print("Keypatch: attempting to modify \"{0}\" at 0x{1:X} to \"{2}\"".format(
-                            self.kp_asm.ida_get_disasm(address), address, assembly))
+                    print(f"Keypatch: attempting to modify \"{self.kp_asm.ida_get_disasm(address)}\" at 0x{address:X} to \"{assembly}\"")
 
                     length = self.kp_asm.patch_code(address, raw_assembly, syntax, padding, comment, None)
                     if length > 0:
@@ -1867,20 +1843,21 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
                     else:
                         init_assembly = f.c_assembly.value
                         if length == 0:
-                            warning("ERROR: Keypatch found invalid assembly [{0}]".format(assembly))
+                            warning(f"ERROR: Keypatch found invalid assembly [{assembly}]")
                         elif length == -1:
-                            warning("ERROR: Keypatch failed to patch binary at 0x{0:X}!".format(address))
+                            warning(f"ERROR: Keypatch failed to patch binary at 0x{address:X}!")
                         elif length == -2:
-                            warning("ERROR: Keypatch can't read original data at 0x{0:X}, try again".format(address))
+                            warning(f"ERROR: Keypatch can't read original data at 0x{address:X}, try again")
 
                 except KsError as e:
-                    print("Keypatch Error: {0}".format(e))
+                    print(f"Keypatch Error: {e}")
             else:   # Cancel
                 break
             f.Free()
 
     # handler for Fill Range menu
     def fill_range(self):
+        """Fill a range of code with assembly or hex bytes"""
         # be sure that this arch is supported by Keystone
         if self.kp_asm.arch is None:
             warning("ERROR: Keypatch cannot handle this architecture (unsupported by Keystone), quit!")
@@ -1911,18 +1888,17 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
 
                 raw_assembly = self.kp_asm.ida_resolve(assembly, addr_begin)
 
-                print("Keypatch: attempting to fill range [0x{0:X}:0x{1:X}] with \"{2}\"".format(
-                    addr_begin, addr_end - 1, assembly))
+                print(f"Keypatch: attempting to fill range [0x{addr_begin:X}:0x{addr_end - 1:X}] with \"{assembly}\"")
 
                 length = self.kp_asm.fill_code(addr_begin, addr_end, raw_assembly, syntax, padding, comment, None)
                 if length == 0:
                     warning("ERROR: Keypatch failed to process this input.")
-                    print("Keypatch: FAILED to process this input '{0}'".format(assembly))
+                    print(f"Keypatch: FAILED to process this input '{assembly}'")
                 elif length == -1:
-                    warning("ERROR: Keypatch failed to patch binary at 0x{0:X}!".format(addr_begin))
+                    warning(f"ERROR: Keypatch failed to patch binary at 0x{addr_begin:X}!")
 
             except KsError as e:
-                print("Keypatch Error: {0}".format(e))
+                print(f"Keypatch Error: {e}")
 
         # free this form
         f.Free()
