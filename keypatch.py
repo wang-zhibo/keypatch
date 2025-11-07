@@ -123,20 +123,68 @@ else:
 VERSION = "2.2"
 
 
-MAX_INSTRUCTION_STRLEN = 256
-MAX_ENCODING_LEN = 40
-MAX_ADDRESS_LEN = 40
-ENCODING_ERR_OUTPUT = "..."
-KP_GITHUB_VERSION = "https://raw.githubusercontent.com/keystone-engine/keypatch/master/VERSION_STABLE"
-KP_HOMEPAGE = "http://keystone-engine.org/keypatch"
+################################ Configuration Constants ###########################################
+class KeypatchConstants:
+    """Centralized configuration constants for Keypatch"""
+    # UI Constants
+    MAX_INSTRUCTION_STRLEN = 256
+    MAX_ENCODING_LEN = 40
+    MAX_ADDRESS_LEN = 40
+    ENCODING_ERR_OUTPUT = "..."
+    
+    # Network Constants
+    KP_GITHUB_VERSION = "https://raw.githubusercontent.com/keystone-engine/keypatch/master/VERSION_STABLE"
+    KP_HOMEPAGE = "http://keystone-engine.org/keypatch"
+    
+    # Architecture Constants
+    X86_NOP = b"\x90"
+    
+    # File Constants
+    KP_CFGFILE = os.path.join(idaapi.get_user_idadir(), "keypatch.cfg")
 
-X86_NOP = "\x90"
+# Legacy constants for backward compatibility
+MAX_INSTRUCTION_STRLEN = KeypatchConstants.MAX_INSTRUCTION_STRLEN
+MAX_ENCODING_LEN = KeypatchConstants.MAX_ENCODING_LEN
+MAX_ADDRESS_LEN = KeypatchConstants.MAX_ADDRESS_LEN
+ENCODING_ERR_OUTPUT = KeypatchConstants.ENCODING_ERR_OUTPUT
+KP_GITHUB_VERSION = KeypatchConstants.KP_GITHUB_VERSION
+KP_HOMEPAGE = KeypatchConstants.KP_HOMEPAGE
+X86_NOP = "\x90"  # Keep as string for legacy code
+KP_CFGFILE = KeypatchConstants.KP_CFGFILE
+#########################################################################################################
 
-# Configuration file
-KP_CFGFILE = os.path.join(idaapi.get_user_idadir(), "keypatch.cfg")
 
-# save all the info on patching
+################################ Patch History Management ###########################################
+class PatchHistory:
+    """Manages the history of patches for undo functionality"""
+    def __init__(self):
+        self._patches = []
+    
+    def add(self, address, assembly, orig_data, patch_comment):
+        """Add a patch to history"""
+        self._patches.append((address, assembly, orig_data, patch_comment))
+    
+    def undo_last(self):
+        """Remove and return the last patch, or None if history is empty"""
+        return self._patches.pop() if self._patches else None
+    
+    def is_empty(self):
+        """Check if patch history is empty"""
+        return len(self._patches) == 0
+    
+    def clear(self):
+        """Clear all patch history"""
+        self._patches.clear()
+    
+    def __len__(self):
+        return len(self._patches)
+
+# Global patch history instance
+patch_history = PatchHistory()
+
+# Legacy global for backward compatibility
 patch_info = []
+#########################################################################################################
 
 ################################ Python3 Compatibility function #######################################
 # Convert bytes to string
@@ -316,6 +364,7 @@ class Keypatch_Asm:
         """Detect hardware architecture and mode from IDA binary info"""
         arch, mode = None, None
 
+        # Get IDA binary info based on version
         if is_ida_version(900):
             # IDA 9.0+
             is_64bit = ida_ida.idainfo_is_64bit()
@@ -327,20 +376,15 @@ class Keypatch_Asm:
             info = idaapi.get_inf_structure()
             is_64bit = info.is_64bit()
             is_32bit = info.is_32bit()
-        
+            
+            # Handle different attribute names
+            cpuname = getattr(info, 'procname', getattr(info, 'procName', '')).lower()
+            
+            # Handle different endian check methods
             try:
-                cpuname = info.procname.lower()
-            except AttributeError:
-                cpuname = info.procName.lower()
-
-            try:
-                # IDA 7 beta 3+ renamed inf.mf -> is_be()/set_be()
                 is_be = idaapi.cvar.inf.is_be()
             except AttributeError:
-                # older IDA versions
                 is_be = idaapi.cvar.inf.mf
-                
-        # print("Keypatch BIG_ENDIAN = %s" %is_be)
         
         if cpuname == "metapc":
             arch = KS_ARCH_X86
@@ -407,10 +451,12 @@ class Keypatch_Asm:
     # remove comment at the end of assembly code
     @staticmethod
     def asm_normalize(text):
+        """Normalize assembly by removing extra spaces and comments"""
         text = ' '.join(text.split())
-        if text.rfind(';') != -1:
-            return text[:text.rfind(';')].strip()
-
+        # Remove comment after semicolon
+        semicolon_pos = text.rfind(';')
+        if semicolon_pos != -1:
+            text = text[:semicolon_pos]
         return text.strip()
 
     @staticmethod
@@ -425,13 +471,24 @@ class Keypatch_Asm:
                 return 1
             else:
                 return -1
-        except:
-            # invalid type
+        except (TypeError, ValueError):
+            # invalid type or value
+            return 0
+        except Exception as e:
+            print(f"Keypatch: Unexpected error in check_address: {e}")
             return 0
 
     ### resolve IDA names from input asm code
-    # todo: a better syntax parser for all archs
     def ida_resolve(self, assembly, address=idc.BADADDR):
+        """Resolve IDA symbol names in assembly code to addresses
+        
+        Args:
+            assembly: Assembly instruction string
+            address: Current address (default: idc.BADADDR)
+            
+        Returns:
+            Assembly string with resolved symbols
+        """
         def _resolve(_op, ignore_kw=True):
             names = re.findall(r"[\$a-z0-9_:\.]+", _op, re.I)
 
@@ -454,7 +511,7 @@ class Keypatch_Asm:
                 if typ in (idaapi.NT_SEG, idaapi.NT_NONE):
                     continue
 
-                _op = _op.replace(sym, '0x{0:X}'.format(value))
+                _op = _op.replace(sym, f'0x{value:X}')
 
             return _op
 
@@ -484,7 +541,7 @@ class Keypatch_Asm:
 
             opers[idx] = ''.join(_op)
 
-        asm = "{0} {1}".format(mnem, ','.join(opers))
+        asm = f"{mnem} {','.join(opers)}"
         return asm
 
     # return bytes of instruction or data
@@ -594,14 +651,14 @@ class Keypatch_Asm:
                     parts[0] = ''
 
                 if '[' not in parts[2]:
-                    parts[2] = '[{0}]'.format(parts[2])
+                    parts[2] = f'[{parts[2]}]'
 
                 o = ''.join(parts)
 
                 if 'ptr ' not in o:
                     dtyp_name = self.get_op_dtype_name(address, i)
                     if dtyp_name != None:
-                        o = "{0} ptr {1}".format(dtyp_name, o)
+                        o = f"{dtyp_name} ptr {o}"
 
             opers.append(o)
             i += 1
@@ -609,67 +666,92 @@ class Keypatch_Asm:
         asm = mnem
         for o in opers:
             if o != '':
-                asm = "{0} {1},".format(asm, o)
+                asm = f"{asm} {o},"
 
         asm = asm.strip(',')
         return asm
 
-    # assemble code with Keystone
-    # return (encoding, count), or (None, 0) on failure
+    # Helper: evaluate arithmetic operand
+    @staticmethod
+    def _eval_operand(assembly, start, stop, prefix=''):
+        """Evaluate arithmetic equation in operand"""
+        imm = assembly[start+1:stop]
+        try:
+            eval_imm = eval(imm)
+            if eval_imm > 0x80000000:
+                eval_imm = 0xffffffff - eval_imm
+                eval_imm += 1
+                eval_imm = -eval_imm
+            return assembly.replace(prefix + imm, prefix + hex(eval_imm))
+        except (SyntaxError, NameError, TypeError, ValueError):
+            return assembly
+    
+    # Helper: check if ARM/ARM64 instruction needs fixing
+    @staticmethod
+    def _check_arm_arm64_insn(arch, mnem):
+        """Check if ARM/ARM64 instruction needs syntax fixing"""
+        if arch == KS_ARCH_ARM:
+            return mnem.startswith("ldr") or mnem.startswith("str")
+        elif arch == KS_ARCH_ARM64:
+            return mnem.startswith("ldr") or mnem.startswith("str") or mnem == "stp"
+        return False
+    
+    # Helper: check if PPC instruction needs fixing
+    @staticmethod
+    def _check_ppc_insn(mnem):
+        """Check if PPC instruction needs syntax fixing"""
+        return mnem in ("stw",)
+    
+    # Helper: replace rightmost occurrence
+    @staticmethod
+    def _rreplace(s, old, new):
+        """Replace the rightmost occurrence of old with new"""
+        li = s.rsplit(old, 1)
+        return new.join(li)
+    
+    # Helper: fix ARM pre-UAL syntax
+    @staticmethod
+    def _fix_arm_ual(mnem, assembly):
+        """Convert ARM pre-UAL assembly to UAL (e.g., streqb -> strbeq)"""
+        if len(mnem) != 6:
+            return assembly
+        
+        if mnem[-1] in ('s', 'b', 'h', 'd'):
+            if mnem[3:5] in ("cc", "eq", "ne", "hs", "lo", "mi", "pl", "vs", 
+                            "vc", "hi", "ls", "ge", "lt", "gt", "le", "al"):
+                return assembly.replace(mnem, mnem[:3] + mnem[-1] + mnem[3:5], 1)
+        
+        return assembly
+    
+    # Helper: fix PPC register syntax
+    def _fix_ppc_registers(self, assembly):
+        """Remove 'r' prefix from PPC registers (r0-r31)"""
+        for n in range(32):
+            r_reg = f"r{n}"
+            # Handle different patterns: " r0,", "(r0)", ", r0"
+            assembly = assembly.replace(f" {r_reg},", f" {n},")
+            assembly = assembly.replace(f"({r_reg})", f"({n})")
+            if assembly.endswith(f", {r_reg}"):
+                assembly = self._rreplace(assembly, f", {r_reg}", f", {n}")
+        return assembly
+    
     def assemble(self, assembly, address, arch=None, mode=None, syntax=None):
-
-        # return assembly with arithmetic equation evaluated
-        def eval_operand(assembly, start, stop, prefix=''):
-            imm = assembly[start+1:stop]
-            try:
-                eval_imm = eval(imm)
-                if eval_imm > 0x80000000:
-                    eval_imm = 0xffffffff - eval_imm
-                    eval_imm += 1
-                    eval_imm = -eval_imm
-                return assembly.replace(prefix + imm, prefix + hex(eval_imm))
-            except:
-                return assembly
+        """Assemble code with Keystone Engine
+        
+        Args:
+            assembly: Assembly instruction string
+            address: Target address for assembly
+            arch: Architecture (default: use current arch)
+            mode: Mode (default: use current mode)
+            syntax: Syntax (default: use current syntax)
+            
+        Returns:
+            tuple: (encoding bytes list, instruction count) or (None, 0) on failure
+        """
 
         # IDA uses different syntax from Keystone
         # sometimes, we can convert code to be consumable by Keystone
         def fix_ida_syntax(assembly):
-
-            # return True if this insn needs to be fixed
-            def check_arm_arm64_insn(arch, mnem):
-                if arch == KS_ARCH_ARM:
-                    if mnem.startswith("ldr") or mnem.startswith("str"):
-                        return True
-                    return False
-                elif arch == KS_ARCH_ARM64:
-                    if mnem.startswith("ldr") or mnem.startswith("str"):
-                        return True
-                    return mnem in ("stp")
-                return False
-
-            # return True if this insn needs to be fixed
-            def check_ppc_insn(mnem):
-                return mnem in ("stw")
-
-            # replace the right most string occurred
-            def rreplace(s, old, new):
-                li = s.rsplit(old, 1)
-                return new.join(li)
-
-            # convert some ARM pre-UAL assembly to UAL, so Keystone can handle it
-            # example: streqb --> strbeq
-            def fix_arm_ual(mnem, assembly):
-                # TODO: this is not an exhaustive list yet
-                if len(mnem) != 6:
-                    return assembly
-
-                if (mnem[-1] in ('s', 'b', 'h', 'd')):
-                    #print(">> 222", mnem[3:5])
-                    if mnem[3:5] in ("cc", "eq", "ne", "hs", "lo", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt", "le", "al"):
-                        return assembly.replace(mnem, mnem[:3] + mnem[-1] + mnem[3:5], 1)
-
-                return assembly
-
             if self.arch != KS_ARCH_X86:
                 assembly = assembly.lower()
             else:
@@ -685,22 +767,9 @@ class Keypatch_Asm:
             if mnem == '':
                 return assembly
 
-            # for PPC, Keystone does not accept registers with 'r' prefix,
-            # but only the number behind. lets try to fix that here by
-            # removing the prefix 'r'.
+            # for PPC, fix register syntax
             if self.arch == KS_ARCH_PPC:
-                for n in range(32):
-                    r = " r%u," %n
-                    if r in assembly:
-                        assembly = assembly.replace(r, " %u," %n)
-                for n in range(32):
-                    r = "(r%u)" %n
-                    if r in assembly:
-                        assembly = assembly.replace(r, "(%u)" %n)
-                for n in range(32):
-                    r = ", r%u" %n
-                    if assembly.endswith(r):
-                        assembly = rreplace(assembly, r, ", %u" %n)
+                assembly = self._fix_ppc_registers(assembly)
 
             if self.arch == KS_ARCH_X86:
                 if mnem == "RETN":
@@ -738,22 +807,20 @@ class Keypatch_Asm:
                     assembly = assembly.replace('movt.w', 'movt')
 
                 if self.arch == KS_ARCH_ARM:
-                    #print(">> before UAL fix: ", assembly)
-                    assembly = fix_arm_ual(mnem, assembly)
-                    #print(">> after UAL fix: ", assembly)
+                    assembly = self._fix_arm_ual(mnem, assembly)
 
-                if check_arm_arm64_insn(self.arch, mnem) or (("[" in assembly) and ("]" in assembly)):
+                if self._check_arm_arm64_insn(self.arch, mnem) or (("[" in assembly) and ("]" in assembly)):
                     bang = assembly.find('#')
                     bracket = assembly.find(']')
                     if bang != -1 and bracket != -1 and bang < bracket:
-                        return eval_operand(assembly, bang, bracket, '#')
+                        return self._eval_operand(assembly, bang, bracket, '#')
                     elif '+0x0]' in assembly:
                         return assembly.replace('+0x0]', ']')
-                elif check_ppc_insn(mnem):
+                elif self._check_ppc_insn(mnem):
                     start = assembly.find(', ')
                     stop = assembly.find('(')
                     if start != -1 and stop != -1 and start < stop:
-                        return eval_operand(assembly, start, stop)
+                        return self._eval_operand(assembly, start, stop)
             return assembly
 
         def is_thumb(address):
@@ -793,7 +860,7 @@ class Keypatch_Asm:
     @staticmethod
     def patch_raw(address, patch_data, size):
         ea = address
-        orig_data = ''
+        orig_data = bytearray()
 
         while ea < (address + size):
 
@@ -802,8 +869,13 @@ class Keypatch_Asm:
                 break
 
             orig_byte = get_wide_byte(ea)
-            orig_data += chr(orig_byte)
-            patch_byte = ord(patch_data[ea - address])
+            orig_data.append(orig_byte)
+            
+            # Handle both bytes and string patch_data for compatibility
+            if isinstance(patch_data, (bytes, bytearray)):
+                patch_byte = patch_data[ea - address]
+            else:
+                patch_byte = ord(patch_data[ea - address])
 
             if patch_byte != orig_byte:
                 # patch one byte
@@ -811,7 +883,7 @@ class Keypatch_Asm:
                     print(f"Keypatch: FAILED to patch byte at 0x{ea:X} [0x{patch_byte:X}]")
                     break
             ea += 1
-        return (ea - address, orig_data)
+        return (ea - address, bytes(orig_data))
 
     # patch at address, return the number of written bytes & original data
     # on patch failure, we revert to the original code, then return (None, None)
@@ -845,6 +917,25 @@ class Keypatch_Asm:
 
         return (patched_len, orig_data)
 
+    # Helper method to generate patch comment
+    @staticmethod
+    def _generate_patch_comment(orig_comment, orig_asm, nop_comment=""):
+        """Generate comment for patched instruction"""
+        asm_lines = ('\n  ').join(orig_asm)
+        if orig_comment == '':
+            return f"Keypatch modified this from:\n  {asm_lines}{nop_comment}"
+        return f"\nKeypatch modified this from:\n  {asm_lines}{nop_comment}"
+    
+    # Helper method to generate fill range comment
+    @staticmethod
+    def _generate_fill_comment(orig_comment, addr_begin, addr_end, orig_asm):
+        """Generate comment for filled range"""
+        asm_lines = ('\n  ').join(['  ' + x for x in orig_asm])
+        size = addr_end - addr_begin
+        if orig_comment == '':
+            return f"Keypatch filled range [0x{addr_begin:X}:0x{addr_end - 1:X}] ({size} bytes), replaced:\n  {asm_lines}"
+        return f"\nKeypatch filled range [0x{addr_begin:X}:0x{addr_end - 1:X}] ({size} bytes), replaced:\n  {asm_lines}"
+    
     # return number of bytes patched
     # return
     #    0  Invalid assembly
@@ -852,7 +943,7 @@ class Keypatch_Asm:
     #   -2  Can't read original data
     #   -3  Invalid address
     def patch_code(self, address, assembly, syntax, padding, save_origcode, orig_asm=None, patch_data=None, patch_comment=None, undo=False):
-        global patch_info
+        global patch_history
 
         if self.check_address(address) != 1:
             # not a valid address
@@ -875,7 +966,7 @@ class Keypatch_Asm:
                 return 0
 
             patch_len = len(encoding)
-            patch_data = ''.join(chr(c) for c in encoding)
+            patch_data = bytes(encoding)
 
             if patch_data == orig_encoding:
                 #print("Keypatch: no need to patch, same encoding data [{0}] at 0x{1:X}".format(to_hexstr(orig_encoding), address))
@@ -886,7 +977,7 @@ class Keypatch_Asm:
                 if patch_len < orig_len:
                     padding_len = orig_len - patch_len
                     patch_len = orig_len
-                    patch_data = patch_data.ljust(patch_len, X86_NOP)
+                    patch_data = patch_data + KeypatchConstants.X86_NOP * padding_len
                 elif patch_len > orig_len:
                     patch_end = address + patch_len - 1
                     ins_end = get_item_end(patch_end)
@@ -894,10 +985,10 @@ class Keypatch_Asm:
 
                     if padding_len > 0:
                         patch_len = ins_end - address
-                        patch_data = patch_data.ljust(patch_len, X86_NOP)
+                        patch_data = patch_data + KeypatchConstants.X86_NOP * padding_len
 
                 if padding_len > 0:
-                    nop_comment = "\nKeypatch padded NOP to next boundary: {0} bytes".format(padding_len)
+                    nop_comment = f"\nKeypatch padded NOP to next boundary: {padding_len} bytes"
 
             orig_asm = self.ida_get_disasm_range(address, address + patch_len)
         else:
@@ -913,12 +1004,8 @@ class Keypatch_Asm:
             new_patch_comment = None
             if save_origcode is True:
                 # append original instruction to comments
-                if orig_comment == '':
-                    new_patch_comment = "Keypatch modified this from:\n  {0}{1}".format('\n  '.join(orig_asm), nop_comment)
-                else:
-                    new_patch_comment = "\nKeypatch modified this from:\n  {0}{1}".format('\n  '.join(orig_asm), nop_comment)
-
-                new_comment = "{0}{1}".format(orig_comment, new_patch_comment)
+                new_patch_comment = self._generate_patch_comment(orig_comment, orig_asm, nop_comment)
+                new_comment = f"{orig_comment}{new_patch_comment}"
                 set_comment(address, new_comment)
 
             if padding_len == 0:
@@ -926,7 +1013,8 @@ class Keypatch_Asm:
             else:
                 print(f"Keypatch: successfully patched {plen} byte(s) at 0x{address:X} from [{to_hexstr(p_orig_data)}] to [{to_hexstr(patch_data)}], with {padding_len} byte(s) NOP padded")
             # save this patching for future "undo"
-            patch_info.append((address, assembly, p_orig_data, new_patch_comment))
+            patch_history.add(address, assembly, p_orig_data, new_patch_comment)
+            patch_info.append((address, assembly, p_orig_data, new_patch_comment))  # Legacy support
         else:   # we are reverting
             if patch_comment:
                 # clean previous IDA comment by replacing it with ''
@@ -961,23 +1049,24 @@ class Keypatch_Asm:
         if orig_comment is None:
             orig_comment = ''
 
-        patch_data = ""
+        patch_data = b""
         assembly_new = []
         size = addr_end - addr_begin
         # calculate filling data
-        encode_chr = ''.join(chr(c) for c in encoding)
+        encode_bytes = bytes(encoding)
         while True:
-            if len(patch_data) + len(encode_chr) <= size:
-                patch_data = patch_data + encode_chr
+            if len(patch_data) + len(encode_bytes) <= size:
+                patch_data = patch_data + encode_bytes
                 assembly_new += [assembly.strip()]
             else:
                 break
 
         # for now, only support NOP padding on Intel CPU
         if padding and self.arch == KS_ARCH_X86:
-            for i in range(size -len(patch_data)):
+            padding_count = size - len(patch_data)
+            for i in range(padding_count):
                 assembly_new += ["nop"]
-            patch_data = patch_data.ljust(size, X86_NOP)
+            patch_data = patch_data + KeypatchConstants.X86_NOP * padding_count
 
         (plen, p_orig_data) = self.patch(addr_begin, patch_data, len(patch_data))
         if plen is None:
@@ -987,18 +1076,15 @@ class Keypatch_Asm:
         new_patch_comment = ''
         # append original instruction to comments
         if save_origcode is True:
-            if orig_comment == '':
-                new_patch_comment = f"Keypatch filled range [0x{addr_begin:X}:0x{addr_end - 1:X}] ({addr_end - addr_begin} bytes), replaced:\n  {chr(10).join(['  ' + x for x in orig_asm])}"
-            else:
-                new_patch_comment = f"\nKeypatch filled range [0x{addr_begin:X}:0x{addr_end - 1:X}] ({addr_end - addr_begin} bytes), replaced:\n  {chr(10).join(['  ' + x for x in orig_asm])}"
-
+            new_patch_comment = self._generate_fill_comment(orig_comment, addr_begin, addr_end, orig_asm)
             new_comment = f"{orig_comment}{new_patch_comment}"
             set_comment(addr_begin, new_comment)
 
         print(f"Keypatch: successfully filled range [0x{addr_begin:X}:0x{addr_end - 1:X}] ({addr_end - addr_begin} bytes) with \"{assembly}\", replaced \"{'; '.join(orig_asm)}\"")
 
         # save this modification for future "undo"
-        patch_info.append((addr_begin, '\n  '.join(assembly_new), p_orig_data, new_patch_comment))
+        patch_history.add(addr_begin, '\n  '.join(assembly_new), p_orig_data, new_patch_comment)
+        patch_info.append((addr_begin, '\n  '.join(assembly_new), p_orig_data, new_patch_comment))  # Legacy support
 
         return plen
 
@@ -1027,7 +1113,8 @@ class Keypatch_Asm:
 
         try:
             idx = values.index(value)
-        except:
+        except ValueError:
+            # Value not found in list
             idx = default
 
         return idx
@@ -1096,7 +1183,7 @@ class Keypatch_Form(idaapi.Form):
             address = self.GetControlValue(self.c_addr)
             try:
                 is_mapped(address)
-            except:
+            except (TypeError, ValueError):
                 # invalid address value
                 address = 0
 
@@ -1406,7 +1493,7 @@ KEYPATCH:: Search
                     break
                 addresses.append([address])
                 address = address + 1
-            c = SearchResultChooser("Searching for [{0}]".format(self.GetControlValue(self.c_raw_assembly)), addresses)
+            c = SearchResultChooser(f"Searching for [{self.GetControlValue(self.c_raw_assembly)}]", addresses)
             c.show()
             return 1
 
@@ -1465,13 +1552,13 @@ class About_Form(idaapi.Form):
 BUTTON YES* Open Keypatch Website
 KEYPATCH:: About
 
-            {FormChangeCb}
-            Keypatch IDA plugin v%s, using Keystone Engine v%s.
+            {{FormChangeCb}}
+            Keypatch IDA plugin v{version}, using Keystone Engine v{keystone.__version__}.
             (c) Nguyen Anh Quynh + Thanh Nguyen, 2018.
 
             Keypatch is released under the GPL v2.
             Find more info at http://www.keystone-engine.org/keypatch
-            """ %(version, keystone.__version__), {
+            """, {
             'FormChangeCb': self.FormChangeCb(self.OnFormChange),
             })
 
@@ -1496,10 +1583,10 @@ class Update_Form(idaapi.Form):
 BUTTON YES* Open Keypatch Website
 KEYPATCH:: Check for update
 
-            {FormChangeCb}
-            Your Keypatch is v%s
-            %s
-            """ %(version, message), {
+            {{FormChangeCb}}
+            Your Keypatch is v{version}
+            {message}
+            """, {
             'FormChangeCb': self.FormChangeCb(self.OnFormChange),
             })
         self.Compile()
@@ -1600,8 +1687,8 @@ try:
             self.plugin.about()
             return 1
 
-except:
-    pass
+except Exception as e:
+    print(f"Keypatch: Failed to register menu context classes: {e}")
 
 # hooks for popup menu
 class Hooks(idaapi.UI_Hooks):
@@ -1676,10 +1763,10 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
             Kp_MC_Fill_Range.register(self, "Fill Range")
             Kp_MC_Undo.register(self, "Undo last patching")
             Kp_MC_Search.register(self, "Search")
-            Kp_MC_Updater.register(self, "Check for update")
-            Kp_MC_About.register(self, "About")
-        except:
-            pass
+            # Kp_MC_Updater.register(self, "Check for update")
+            # Kp_MC_About.register(self, "About")
+        except Exception as e:
+            print(f"Keypatch: Failed to register popup menu handlers: {e}")
 
         # setup popup menu
         self.hooks = Hooks()
@@ -1792,16 +1879,21 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
 
     # handler for Undo menu
     def undo(self):
-        global patch_info
-        if len(patch_info) == 0:
+        global patch_history, patch_info
+        if patch_history.is_empty():
             # TODO: disable Undo menu?
             warning("ERROR: Keypatch already got to the last undo patching!")
         else:
-            (address, assembly, p_orig_data, patch_comment) = patch_info[-1]
-
-            # undo the patch
-            self.kp_asm.patch_code(address, None, None, None, None, orig_asm=[assembly], patch_data=p_orig_data, patch_comment=patch_comment, undo=True)
-            del(patch_info[-1])
+            patch_data = patch_history.undo_last()
+            if patch_data:
+                (address, assembly, p_orig_data, patch_comment) = patch_data
+                
+                # undo the patch
+                self.kp_asm.patch_code(address, None, None, None, None, orig_asm=[assembly], patch_data=p_orig_data, patch_comment=patch_comment, undo=True)
+                
+                # Also update legacy patch_info
+                if len(patch_info) > 0:
+                    del(patch_info[-1])
 
     # handler for Search menu
     def search(self):
