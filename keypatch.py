@@ -50,11 +50,23 @@ if is_debug:
 import os
 import re
 import json
-from keystone import *
+
+# Import Keystone Engine
+try:
+    from keystone import *
+    import keystone
+except ImportError as e:
+    print("=" * 80)
+    print("ERROR: Keypatch requires Keystone Engine to be installed!")
+    print("Please install Keystone Engine:")
+    print("  pip install keystone-engine")
+    print("Or visit: http://www.keystone-engine.org")
+    print("=" * 80)
+    raise ImportError("Keystone Engine is not installed") from e
+
 import idc
 import idaapi
 import ida_ida
-import six
 
 ################################ IDA 6/7 Compatibility import ###########################################
 if idaapi.IDA_SDK_VERSION >= 700:
