@@ -157,27 +157,73 @@ KP_CFGFILE = KeypatchConstants.KP_CFGFILE
 ################################ Patch History Management ###########################################
 class PatchHistory:
     """Manages the history of patches for undo functionality"""
-    def __init__(self):
+    def __init__(self, max_history=100):
         self._patches = []
+        self._max_history = max_history
     
     def add(self, address, assembly, orig_data, patch_comment):
-        """Add a patch to history"""
+        """Add a patch to history
+        
+        Args:
+            address: Patch address
+            assembly: Assembly code
+            orig_data: Original data
+            patch_comment: Patch comment
+        """
         self._patches.append((address, assembly, orig_data, patch_comment))
+        
+        # Limit history size to prevent memory issues
+        if len(self._patches) > self._max_history:
+            self._patches.pop(0)  # Remove oldest
+            print(f"Keypatch: Patch history limit reached ({self._max_history}), removed oldest entry")
     
     def undo_last(self):
-        """Remove and return the last patch, or None if history is empty"""
+        """Remove and return the last patch, or None if history is empty
+        
+        Returns:
+            tuple: (address, assembly, orig_data, patch_comment) or None
+        """
         return self._patches.pop() if self._patches else None
     
+    def peek_last(self):
+        """View the last patch without removing it
+        
+        Returns:
+            tuple: (address, assembly, orig_data, patch_comment) or None
+        """
+        return self._patches[-1] if self._patches else None
+    
     def is_empty(self):
-        """Check if patch history is empty"""
+        """Check if patch history is empty
+        
+        Returns:
+            bool: True if empty, False otherwise
+        """
         return len(self._patches) == 0
     
     def clear(self):
         """Clear all patch history"""
+        count = len(self._patches)
         self._patches.clear()
+        if count > 0:
+            print(f"Keypatch: Cleared {count} patch(es) from history")
+    
+    def get_history_info(self):
+        """Get summary of patch history
+        
+        Returns:
+            str: Summary information
+        """
+        if not self._patches:
+            return "Patch history is empty"
+        
+        return f"Patch history: {len(self._patches)} patch(es), max: {self._max_history}"
     
     def __len__(self):
         return len(self._patches)
+    
+    def __repr__(self):
+        return f"PatchHistory(patches={len(self._patches)}, max={self._max_history})"
 
 # Global patch history instance
 patch_history = PatchHistory()
@@ -1015,6 +1061,7 @@ class Keypatch_Asm:
             # save this patching for future "undo"
             patch_history.add(address, assembly, p_orig_data, new_patch_comment)
             patch_info.append((address, assembly, p_orig_data, new_patch_comment))  # Legacy support
+            print(f"Keypatch: {len(patch_history)} patch(es) in undo history (use 'Edit > Keypatch > Undo last patching' to revert)")
         else:   # we are reverting
             if patch_comment:
                 # clean previous IDA comment by replacing it with ''
@@ -1085,6 +1132,7 @@ class Keypatch_Asm:
         # save this modification for future "undo"
         patch_history.add(addr_begin, '\n  '.join(assembly_new), p_orig_data, new_patch_comment)
         patch_info.append((addr_begin, '\n  '.join(assembly_new), p_orig_data, new_patch_comment))  # Legacy support
+        print(f"Keypatch: {len(patch_history)} patch(es) in undo history (use 'Edit > Keypatch > Undo last patching' to revert)")
 
         return plen
 
@@ -1880,20 +1928,43 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
     # handler for Undo menu
     def undo(self):
         global patch_history, patch_info
+        
         if patch_history.is_empty():
-            # TODO: disable Undo menu?
-            warning("ERROR: Keypatch already got to the last undo patching!")
+            warning("Keypatch: 没有可撤销的补丁操作！\n\nKeypatch: No patches to undo!")
+            print("Keypatch: Undo failed - patch history is empty")
+            return
+        
+        patch_data = patch_history.undo_last()
+        if not patch_data:
+            warning("Keypatch: 撤销失败，无法获取补丁数据！\n\nKeypatch: Undo failed - unable to retrieve patch data!")
+            print("Keypatch: Undo failed - patch data is None")
+            return
+        
+        (address, assembly, p_orig_data, patch_comment) = patch_data
+        
+        # Verify address before undoing
+        if self.kp_asm.check_address(address) != 1:
+            warning(f"Keypatch: 撤销失败，地址 0x{address:X} 无效！\n\nKeypatch: Undo failed - invalid address 0x{address:X}!")
+            print(f"Keypatch: Undo failed - invalid address 0x{address:X}")
+            # Restore the patch data to history since undo failed
+            patch_history.add(address, assembly, p_orig_data, patch_comment)
+            return
+        
+        # Perform undo operation
+        result = self.kp_asm.patch_code(address, None, None, None, None, 
+                                       orig_asm=[assembly], patch_data=p_orig_data, 
+                                       patch_comment=patch_comment, undo=True)
+        
+        if result < 0:
+            warning(f"Keypatch: 撤销失败（错误码: {result}）！\n\nKeypatch: Undo failed (error code: {result})!")
+            print(f"Keypatch: Undo operation failed with error code {result}")
+            # Restore the patch data to history since undo failed
+            patch_history.add(address, assembly, p_orig_data, patch_comment)
         else:
-            patch_data = patch_history.undo_last()
-            if patch_data:
-                (address, assembly, p_orig_data, patch_comment) = patch_data
-                
-                # undo the patch
-                self.kp_asm.patch_code(address, None, None, None, None, orig_asm=[assembly], patch_data=p_orig_data, patch_comment=patch_comment, undo=True)
-                
-                # Also update legacy patch_info
-                if len(patch_info) > 0:
-                    del(patch_info[-1])
+            # Also update legacy patch_info
+            if len(patch_info) > 0:
+                del(patch_info[-1])
+            print(f"Keypatch: Successfully undid patch at 0x{address:X}, {len(patch_history)} patch(es) remaining in history")
 
     # handler for Search menu
     def search(self):
