@@ -1338,21 +1338,21 @@ class Keypatch_FillRange(Keypatch_Form):
         # create FillRange form
         super(Keypatch_FillRange, self).__init__(
             r"""STARTITEM {id:c_assembly}
-BUTTON YES* Patch
-KEYPATCH:: Fill Range
+BUTTON YES* 补丁
+KEYPATCH:: 填充区域
 
             {FormChangeCb}
-            <Endian     :{c_endian}>
-            <~S~yntax     :{c_syntax}>
-            <Start      :{c_addr}>
-            <End        :{c_addr_end}>
-            <Size       :{c_size}>
-            <~A~ssembly   :{c_assembly}>
-             <##-   Fixup :{c_raw_assembly}>
-             <##-   Encode:{c_encoding}>
-             <##-   Size  :{c_encoding_len}>
-            <~N~OPs padding until next instruction boundary:{c_opt_padding}>
-            <Save ~o~riginal instructions in IDA comment:{c_opt_comment}>{c_opt_chk}>
+            <字节序     :{c_endian}>
+            <~语~法     :{c_syntax}>
+            <起始地址      :{c_addr}>
+            <结束地址        :{c_addr_end}>
+            <大小       :{c_size}>
+            <~汇~编指令   :{c_assembly}>
+             <##-   修正 :{c_raw_assembly}>
+             <##-   编码:{c_encoding}>
+             <##-   大小  :{c_encoding_len}>
+            <~N~OP填充至下一指令边界:{c_opt_padding}>
+            <在IDA注释中保存~原~始指令:{c_opt_comment}>{c_opt_chk}>
             """, {
             'c_endian': self.DropdownListControl(
                           items = list(self.kp_asm.endian_lists.keys()),
@@ -1392,22 +1392,22 @@ class Keypatch_Patcher(Keypatch_Form):
         # create Patcher form
         super(Keypatch_Patcher, self).__init__(
             r"""STARTITEM {id:c_assembly}
-BUTTON YES* Patch
-KEYPATCH:: Patcher
+BUTTON YES* 补丁
+KEYPATCH:: 补丁工具
 
             {FormChangeCb}
-            <Endian     :{c_endian}>
-            <~S~yntax     :{c_syntax}>
-            <Address    :{c_addr}>
-            <Original   :{c_orig_assembly}>
-             <##-   Encode:{c_orig_encoding}>
-             <##-   Size  :{c_orig_len}>
-            <~A~ssembly   :{c_assembly}>
-             <##-   Fixup :{c_raw_assembly}>
-             <##-   Encode:{c_encoding}>
-             <##-   Size  :{c_encoding_len}>
-            <~N~OPs padding until next instruction boundary:{c_opt_padding}>
-            <Save ~o~riginal instructions in IDA comment:{c_opt_comment}>{c_opt_chk}>
+            <字节序     :{c_endian}>
+            <~语~法     :{c_syntax}>
+            <地址    :{c_addr}>
+            <原始指令   :{c_orig_assembly}>
+             <##-   编码:{c_orig_encoding}>
+             <##-   大小  :{c_orig_len}>
+            <~汇~编指令   :{c_assembly}>
+             <##-   修正 :{c_raw_assembly}>
+             <##-   编码:{c_encoding}>
+             <##-   大小  :{c_encoding_len}>
+            <~N~OP填充至下一指令边界:{c_opt_padding}>
+            <在IDA注释中保存~原~始指令:{c_opt_comment}>{c_opt_chk}>
             """, {
             'c_endian': self.DropdownListControl(
                           items = list(self.kp_asm.endian_lists.keys()),
@@ -1446,7 +1446,7 @@ class SearchResultChooser(Choose):
     def __init__(self, title, items, flags=0, width=None, height=None, embedded=False, modal=False):
         super(SearchResultChooser, self).__init__(
             title,
-            [["Address", Choose.CHCOL_HEX|40]],
+            [["地址", Choose.CHCOL_HEX|40]],
             flags = flags,
             width = width,
             height = height,
@@ -1484,18 +1484,18 @@ class Keypatch_Search(Keypatch_Form):
         # create Search form
         super(Keypatch_Search, self).__init__(
             r"""STARTITEM {id:c_assembly}
-BUTTON YES* Search
-KEYPATCH:: Search
+BUTTON YES* 搜索
+KEYPATCH:: 搜索
 
             {FormChangeCb}
-            <A~r~ch       :{c_arch}>
-            <E~n~dian     :{c_endian}>
-            <~S~yntax     :{c_syntax}>
-            <A~d~dress    :{c_addr}>
-            <~A~ssembly   :{c_assembly}>
-             <##-   Fixup :{c_raw_assembly}>
-             <##-   Encode:{c_encoding}>
-             <##-   Size  :{c_encoding_len}>
+            <架~构~       :{c_arch}>
+            <字~节~序     :{c_endian}>
+            <~语~法     :{c_syntax}>
+            <~地~址    :{c_addr}>
+            <~汇~编指令   :{c_assembly}>
+             <##-   修正 :{c_raw_assembly}>
+             <##-   编码:{c_encoding}>
+             <##-   大小  :{c_encoding_len}>
             """, {
             'c_addr': self.NumericInput(value=address, swidth=MAX_ADDRESS_LEN, tp=self.FT_ADDR),
             'c_assembly': self.StringInput(value=self.asm[:MAX_INSTRUCTION_STRLEN], width=MAX_INSTRUCTION_STRLEN),
@@ -1541,7 +1541,7 @@ KEYPATCH:: Search
                     break
                 addresses.append([address])
                 address = address + 1
-            c = SearchResultChooser(f"Searching for [{self.GetControlValue(self.c_raw_assembly)}]", addresses)
+            c = SearchResultChooser(f"搜索 [{self.GetControlValue(self.c_raw_assembly)}]", addresses)
             c.show()
             return 1
 
@@ -1597,15 +1597,15 @@ class About_Form(idaapi.Form):
         # create About form
         super(About_Form, self).__init__(
             r"""STARTITEM 0
-BUTTON YES* Open Keypatch Website
-KEYPATCH:: About
+BUTTON YES* 打开 Keypatch 网站
+KEYPATCH:: 关于
 
             {{FormChangeCb}}
-            Keypatch IDA plugin v{version}, using Keystone Engine v{keystone.__version__}.
+            Keypatch IDA 插件 v{version}, 使用 Keystone 引擎 v{keystone.__version__}.
             (c) Nguyen Anh Quynh + Thanh Nguyen, 2018.
 
-            Keypatch is released under the GPL v2.
-            Find more info at http://www.keystone-engine.org/keypatch
+            Keypatch 以 GPL v2 协议发布。
+            更多信息请访问 http://www.keystone-engine.org/keypatch
             """, {
             'FormChangeCb': self.FormChangeCb(self.OnFormChange),
             })
@@ -1628,11 +1628,11 @@ class Update_Form(idaapi.Form):
         # create Update form
         super(Update_Form, self).__init__(
             r"""STARTITEM 0
-BUTTON YES* Open Keypatch Website
-KEYPATCH:: Check for update
+BUTTON YES* 打开 Keypatch 网站
+KEYPATCH:: 检查更新
 
             {{FormChangeCb}}
-            Your Keypatch is v{version}
+            您的 Keypatch 版本为 v{version}
             {message}
             """, {
             'FormChangeCb': self.FormChangeCb(self.OnFormChange),
@@ -1775,9 +1775,9 @@ kp_initialized = False
 # Plugin
 #--------------------------------------------------------------------------
 class Keypatch_Plugin_t(idaapi.plugin_t):
-    comment = "Keypatch plugin for IDA Pro (using Keystone framework)"
-    help = "Find more information on Keypatch at http://keystone-engine.org/keypatch"
-    wanted_name = "Keypatch Patcher"
+    comment = "IDA Pro 的 Keypatch 插件（使用 Keystone 框架）"
+    help = "在 http://keystone-engine.org/keypatch 查找更多 Keypatch 信息"
+    wanted_name = "Keypatch 补丁工具"
     wanted_hotkey = "Ctrl-Alt-K"
     flags = idaapi.PLUGIN_KEEP
 
@@ -1791,11 +1791,11 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
             with open(KP_CFGFILE, "rt") as f:
                 self.opts = json.load(f)
         except FileNotFoundError:
-            print("Keypatch: Config file not found. Using default settings.")
+            print("Keypatch: 未找到配置文件。使用默认设置。")
         except json.JSONDecodeError as e:
-            print(f"Keypatch: Config file is corrupted: {e}. Using default settings.")
+            print(f"Keypatch: 配置文件损坏: {e}。使用默认设置。")
         except Exception as e:
-            print(f"Keypatch: Failed to load config file: {e}. Using default settings.")
+            print(f"Keypatch: 加载配置文件失败: {e}。使用默认设置。")
 
         # use default values if not defined in config file
         self.opts.setdefault('c_opt_padding', 1)
@@ -1807,14 +1807,14 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
 
         # register popup menu handlers
         try:
-            Kp_MC_Patcher.register(self, "Patcher    (Ctrl-Alt-K)")
-            Kp_MC_Fill_Range.register(self, "Fill Range")
-            Kp_MC_Undo.register(self, "Undo last patching")
-            Kp_MC_Search.register(self, "Search")
-            # Kp_MC_Updater.register(self, "Check for update")
-            # Kp_MC_About.register(self, "About")
+            Kp_MC_Patcher.register(self, "补丁工具    (Ctrl-Alt-K)")
+            Kp_MC_Fill_Range.register(self, "填充区域")
+            Kp_MC_Undo.register(self, "撤销上次补丁")
+            Kp_MC_Search.register(self, "搜索")
+            # Kp_MC_Updater.register(self, "检查更新")
+            # Kp_MC_About.register(self, "关于")
         except Exception as e:
-            print(f"Keypatch: Failed to register popup menu handlers: {e}")
+            print(f"Keypatch: 注册弹出菜单处理程序失败: {e}")
 
         # setup popup menu
         self.hooks = Hooks()
@@ -1826,42 +1826,42 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
 
             if is_ida_version(700):
                 # Add menu for IDA >= 7.0
-                idaapi.attach_action_to_menu("Edit/Keypatch/Patcher", Kp_MC_Patcher.get_name(), idaapi.SETMENU_APP)
-                idaapi.attach_action_to_menu("Edit/Keypatch/About", Kp_MC_About.get_name(), idaapi.SETMENU_APP)
-                idaapi.attach_action_to_menu("Edit/Keypatch/Check for update", Kp_MC_Updater.get_name(), idaapi.SETMENU_APP)
-                idaapi.attach_action_to_menu("Edit/Keypatch/Search", Kp_MC_Search.get_name(), idaapi.SETMENU_APP)
-                idaapi.attach_action_to_menu("Edit/Keypatch/Undo last patching", Kp_MC_Undo.get_name(), idaapi.SETMENU_APP)
-                idaapi.attach_action_to_menu("Edit/Keypatch/Fill Range", Kp_MC_Fill_Range.get_name(), idaapi.SETMENU_APP)
+                idaapi.attach_action_to_menu("编辑/Keypatch/补丁工具", Kp_MC_Patcher.get_name(), idaapi.SETMENU_APP)
+                idaapi.attach_action_to_menu("编辑/Keypatch/关于", Kp_MC_About.get_name(), idaapi.SETMENU_APP)
+                idaapi.attach_action_to_menu("编辑/Keypatch/检查更新", Kp_MC_Updater.get_name(), idaapi.SETMENU_APP)
+                idaapi.attach_action_to_menu("编辑/Keypatch/搜索", Kp_MC_Search.get_name(), idaapi.SETMENU_APP)
+                idaapi.attach_action_to_menu("编辑/Keypatch/撤销上次补丁", Kp_MC_Undo.get_name(), idaapi.SETMENU_APP)
+                idaapi.attach_action_to_menu("编辑/Keypatch/填充区域", Kp_MC_Fill_Range.get_name(), idaapi.SETMENU_APP)
             else:
                 # add Keypatch menu
-                menu = idaapi.add_menu_item("Edit/Keypatch/", "Patcher     (Ctrl-Alt-K)", "", 1, self.patcher, None)
+                menu = idaapi.add_menu_item("编辑/Keypatch/", "补丁工具     (Ctrl-Alt-K)", "", 1, self.patcher, None)
                 if menu is not None:
-                    idaapi.add_menu_item("Edit/Keypatch/", "About", "", 1, self.about, None)
-                    idaapi.add_menu_item("Edit/Keypatch/", "Check for update", "", 1, self.updater, None)
-                    idaapi.add_menu_item("Edit/Keypatch/", "-", "", 1, self.menu_null, None)
-                    idaapi.add_menu_item("Edit/Keypatch/", "Search", "", 1, self.search, None)
-                    idaapi.add_menu_item("Edit/Keypatch/", "-", "", 1, self.menu_null, None)
-                    idaapi.add_menu_item("Edit/Keypatch/", "Undo last patching", "", 1, self.undo, None)
-                    idaapi.add_menu_item("Edit/Keypatch/", "Fill Range", "", 1, self.fill_range, None)
+                    idaapi.add_menu_item("编辑/Keypatch/", "关于", "", 1, self.about, None)
+                    idaapi.add_menu_item("编辑/Keypatch/", "检查更新", "", 1, self.updater, None)
+                    idaapi.add_menu_item("编辑/Keypatch/", "-", "", 1, self.menu_null, None)
+                    idaapi.add_menu_item("编辑/Keypatch/", "搜索", "", 1, self.search, None)
+                    idaapi.add_menu_item("编辑/Keypatch/", "-", "", 1, self.menu_null, None)
+                    idaapi.add_menu_item("编辑/Keypatch/", "撤销上次补丁", "", 1, self.undo, None)
+                    idaapi.add_menu_item("编辑/Keypatch/", "填充区域", "", 1, self.fill_range, None)
                 elif not is_ida_version(680):
                     # IDA < 6.8: older IDAPython doesn't add new submenu
                     # Put Keypatch menu in Edit \ Patch program instead
-                    idaapi.add_menu_item("Edit/Patch program/", "-", "", 0, self.menu_null, None)
-                    idaapi.add_menu_item("Edit/Patch program/", "Keypatch:: About", "", 0, self.about, None)
-                    idaapi.add_menu_item("Edit/Patch program/", "Keypatch:: Check for update", "", 0, self.updater, None)
-                    idaapi.add_menu_item("Edit/Patch program/", "Keypatch:: Search", "", 0, self.search, None)
-                    idaapi.add_menu_item("Edit/Patch program/", "Keypatch:: Undo last patching", "", 0, self.undo, None)
-                    idaapi.add_menu_item("Edit/Patch program/", "Keypatch:: Fill Range", "", 0, self.fill_range, None)
-                    idaapi.add_menu_item("Edit/Patch program/", "Keypatch:: Patcher     (Ctrl-Alt-K)", "", 0, self.patcher, None)
+                    idaapi.add_menu_item("编辑/补丁程序/", "-", "", 0, self.menu_null, None)
+                    idaapi.add_menu_item("编辑/补丁程序/", "Keypatch:: 关于", "", 0, self.about, None)
+                    idaapi.add_menu_item("编辑/补丁程序/", "Keypatch:: 检查更新", "", 0, self.updater, None)
+                    idaapi.add_menu_item("编辑/补丁程序/", "Keypatch:: 搜索", "", 0, self.search, None)
+                    idaapi.add_menu_item("编辑/补丁程序/", "Keypatch:: 撤销上次补丁", "", 0, self.undo, None)
+                    idaapi.add_menu_item("编辑/补丁程序/", "Keypatch:: 填充区域", "", 0, self.fill_range, None)
+                    idaapi.add_menu_item("编辑/补丁程序/", "Keypatch:: 补丁工具     (Ctrl-Alt-K)", "", 0, self.patcher, None)
 
             print("=" * 80)
             print(f"Keypatch v{VERSION} (c) Nguyen Anh Quynh & Thanh Nguyen, 2018")
-            print(f"Keypatch is using Keystone v{keystone.__version__}")
-            print("Keypatch Patcher's shortcut key is Ctrl-Alt-K")
-            print("Use the same hotkey Ctrl-Alt-K to open 'Fill Range' window on a selected range of code")
-            print("To revert (undo) the last patching, choose menu Edit | Keypatch | Undo last patching")
-            print("Keypatch Search is available from menu Edit | Keypatch | Search")
-            print(f"Find more information about Keypatch at {KP_HOMEPAGE}")
+            print(f"Keypatch 正在使用 Keystone v{keystone.__version__}")
+            print("Keypatch 补丁工具快捷键为 Ctrl-Alt-K")
+            print("使用相同的快捷键 Ctrl-Alt-K 可在选中的代码范围上打开'填充区域'窗口")
+            print("要撤销（取消）上次补丁操作，请选择菜单 编辑 | Keypatch | 撤销上次补丁")
+            print("Keypatch 搜索功能可从菜单 编辑 | Keypatch | 搜索 访问")
+            print(f"更多关于 Keypatch 的信息请访问 {KP_HOMEPAGE}")
 
             self.load_configuration()
 
@@ -1881,9 +1881,9 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
         try:
             with open(KP_CFGFILE, "wt") as f:
                 json.dump(self.opts, f, indent=2)
-            print(f"Keypatch: configuration is saved to {KP_CFGFILE}")
+            print(f"Keypatch: 配置已保存到 {KP_CFGFILE}")
         except Exception as e:
-            print(f"Keypatch: FAILED to save config file: {e}")
+            print(f"Keypatch: 保存配置文件失败: {e}")
 
     # null handler
     def menu_null(self):
@@ -1907,23 +1907,23 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
                 tmp = content[content.find(sig)+len(sig):]
                 version_stable = tmp[:tmp.find('"')]
             except Exception as e:
-                print(f"Keypatch: Failed to parse version info: {e}")
-                warning("ERROR: Keypatch failed to parse version information.")
+                print(f"Keypatch: 解析版本信息失败: {e}")
+                warning("错误: Keypatch 解析版本信息失败。")
                 return
 
             # compare with the current version
             if version_stable == VERSION:
-                msg = "Good, you are already on the latest stable version!"
+                msg = "很好，您已经在使用最新稳定版本！"
             else:
-                msg = f"Download latest stable version {version_stable} from {KP_HOMEPAGE}"
+                msg = f"从 {KP_HOMEPAGE} 下载最新稳定版本 {version_stable}"
             
             f = Update_Form(VERSION, msg)
             f.Execute()
             f.Free()
         else:
             # fail to download
-            warning("ERROR: Keypatch failed to connect to internet (Github). Try again later.")
-            print("Keypatch: FAILED to connect to Github to check for latest update. Try again later.")
+            warning("错误: Keypatch 连接互联网（Github）失败。请稍后重试。")
+            print("Keypatch: 连接 Github 检查更新失败。请稍后重试。")
 
     # handler for Undo menu
     def undo(self):
@@ -1977,7 +1977,7 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
     def patcher(self):
         # be sure that this arch is supported by Keystone
         if self.kp_asm.arch is None:
-            warning("ERROR: Keypatch cannot handle this architecture (unsupported by Keystone), quit!")
+            warning("错误: Keypatch 无法处理此架构（Keystone 不支持），退出！")
             return
 
         selection, addr_begin, addr_end = read_range_selection()
@@ -2008,7 +2008,7 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
 
                     raw_assembly = self.kp_asm.ida_resolve(assembly, address)
 
-                    print(f"Keypatch: attempting to modify \"{self.kp_asm.ida_get_disasm(address)}\" at 0x{address:X} to \"{assembly}\"")
+                    print(f"Keypatch: 尝试将 0x{address:X} 处的 \"{self.kp_asm.ida_get_disasm(address)}\" 修改为 \"{assembly}\"")
 
                     length = self.kp_asm.patch_code(address, raw_assembly, syntax, padding, comment, None)
                     if length > 0:
@@ -2018,14 +2018,14 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
                     else:
                         init_assembly = f.c_assembly.value
                         if length == 0:
-                            warning(f"ERROR: Keypatch found invalid assembly [{assembly}]")
+                            warning(f"错误: Keypatch 发现无效的汇编指令 [{assembly}]")
                         elif length == -1:
-                            warning(f"ERROR: Keypatch failed to patch binary at 0x{address:X}!")
+                            warning(f"错误: Keypatch 在 0x{address:X} 处补丁二进制失败！")
                         elif length == -2:
-                            warning(f"ERROR: Keypatch can't read original data at 0x{address:X}, try again")
+                            warning(f"错误: Keypatch 无法在 0x{address:X} 处读取原始数据，请重试")
 
                 except KsError as e:
-                    print(f"Keypatch Error: {e}")
+                    print(f"Keypatch 错误: {e}")
             else:   # Cancel
                 break
             f.Free()
@@ -2035,12 +2035,12 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
         """Fill a range of code with assembly or hex bytes"""
         # be sure that this arch is supported by Keystone
         if self.kp_asm.arch is None:
-            warning("ERROR: Keypatch cannot handle this architecture (unsupported by Keystone), quit!")
+            warning("错误: Keypatch 无法处理此架构（Keystone 不支持），退出！")
             return
                
         selection, addr_begin, addr_end = read_range_selection()
         if not selection:
-            warning("ERROR: Keypatch requires a range to be selected for fill in, try again")
+            warning("错误: Keypatch 需要选择一个要填充的范围，请重试")
             return
 
         if self.opts is None:
@@ -2063,17 +2063,17 @@ class Keypatch_Plugin_t(idaapi.plugin_t):
 
                 raw_assembly = self.kp_asm.ida_resolve(assembly, addr_begin)
 
-                print(f"Keypatch: attempting to fill range [0x{addr_begin:X}:0x{addr_end - 1:X}] with \"{assembly}\"")
+                print(f"Keypatch: 尝试用 \"{assembly}\" 填充范围 [0x{addr_begin:X}:0x{addr_end - 1:X}]")
 
                 length = self.kp_asm.fill_code(addr_begin, addr_end, raw_assembly, syntax, padding, comment, None)
                 if length == 0:
-                    warning("ERROR: Keypatch failed to process this input.")
-                    print(f"Keypatch: FAILED to process this input '{assembly}'")
+                    warning("错误: Keypatch 处理此输入失败。")
+                    print(f"Keypatch: 处理输入 '{assembly}' 失败")
                 elif length == -1:
-                    warning(f"ERROR: Keypatch failed to patch binary at 0x{addr_begin:X}!")
+                    warning(f"错误: Keypatch 在 0x{addr_begin:X} 处补丁二进制失败！")
 
             except KsError as e:
-                print(f"Keypatch Error: {e}")
+                print(f"Keypatch 错误: {e}")
 
         # free this form
         f.Free()
